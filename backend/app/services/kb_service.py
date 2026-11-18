@@ -1,0 +1,95 @@
+import chromadb
+from chromadb.api.models.Collection import Collection
+from chromadb.utils import embedding_functions
+
+from app.config import BASE_DIR
+import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+
+KB_DIR = BASE_DIR / "data" / "kb"
+CHROMA_DIR = BASE_DIR / "data" / "chroma"
+EMBEDDING_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+
+_collection = None
+
+_embedding_fn = None
+
+
+def get_embedding_fn():
+    global _embedding_fn
+    if _embedding_fn is not None:
+        return _embedding_fn
+    _embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name=EMBEDDING_MODEL_NAME
+    )
+    return _embedding_fn
+
+
+def get_collection() -> Collection:
+    global _collection
+    if _collection is not None:
+        return _collection
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+    col = client.get_or_create_collection(name="lab_kb", embedding_function=_embedding_fn)
+    if col.count() == 0:
+        ids = []
+        docs = []
+        metas = []
+        for path in sorted(KB_DIR.glob("*.md")):
+            text = path.read_text(encoding="utf-8").strip()
+            if not text:
+                continue
+            ids.append(path.stem)
+            docs.append(text)
+            metas.append({"source": path.name})
+        if docs:
+            col.add(
+                ids=ids,
+                documents=docs,
+                metadatas=metas,
+                )
+    _collection = col
+    return col
+
+
+def warmup():
+    """启动时初始化向量库，启动预热"""
+    col = get_collection()
+    if col.count() > 0:
+        col.query(query_texts=["预热"], n_results=1)
+
+
+def search(query: str):
+    """根据查询关键词去检索向量库"""
+    col = get_collection()
+    if col.count() == 0:
+        return ""
+    res = col.query(query_texts=[query], n_results=col.count())
+    docs = (res.get("documents") or [[]])[0]   
+    metas = (res.get("metadatas") or [[]])[0]
+    distances = (res.get("distances") or [[]])[0]   
+    """
+    以下是检索出来的资料：
+    [预约规则.md]
+
+    # 实验室预约规则...
+
+    [安全规范.md]
+    # 安全规范...
+
+    """
+    score_parts = []
+    for docs, metas, dist in zip(docs, metas, distances):
+        score = 1 / (1 + dist)
+        print(f"[kb] source={metas.get('source')} dist={dist:.4f} score={score:.4f}")
+        if score < 0.5:
+            continue
+        name = metas.get("source") or ""
+        score_parts.append({"score": score, "content": f"[{name}]\n{docs}"})
+    score_parts.sort(key=lambda x: x["score"], reverse=True)
+    final_parts = [item["content"] for item in score_parts[:2]]
+    return "\n\n".join(final_parts)

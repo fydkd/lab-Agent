@@ -1,0 +1,78 @@
+<template>
+  <div class="login-container">
+    <div class="login-box">
+      <h1 style="font-size: 28px">实验室预约系统</h1>
+      <div style="margin-top: 5px; margin-bottom: 30px">基于Agent智能实验室预约系统</div>
+      <el-form :model="form" label-width="0px" style="width: 100%" ref="formRef" :rules="rules">
+        <el-form-item prop="username">
+          <el-input size="large" v-model="form.username" placeholder="请输入账号" :prefix-icon="User" />
+        </el-form-item>
+        <el-form-item prop="password">
+          <el-input size="large" v-model="form.password" placeholder="请输入密码" type="password" :prefix-icon="Lock" show-password />
+        </el-form-item>
+        <el-form-item>
+          <el-button size="large" type="primary" style="width: 100%" @click="login" :loading="loadingValue">登 录</el-button>
+          <div style="text-align: right; margin-top: 20px;">
+            还没有账号？<el-link type="primary" href="/register">去注册</el-link>
+          </div>
+        </el-form-item>
+      </el-form>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import router from '@/router'
+import { User, Lock } from '@element-plus/icons-vue'
+import { loginApi } from '@/api/auth'
+import { useUser } from '@/utils/user'
+
+const { saveLoginData } = useUser()
+
+const formRef = ref()
+const rules = {
+  username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+}
+
+const form = reactive({ 
+  username: '',
+  password: ''
+})
+const loadingValue = ref(false)
+
+const login = async () => {
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
+  loadingValue.value = true
+  try {
+    const res = await loginApi(form)
+    if (res.code === 200) {
+      saveLoginData(res.data)
+      ElMessage.success('登录成功')
+      await router.push('/manager/home')
+    }
+  } finally {
+    loadingValue.value = false
+  }
+}
+</script>
+
+<style scoped>
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+.login-box {
+  width: 380px;
+  padding: 30px;
+  border-radius: 8px;
+  box-shadow: 0 8px 12px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  background-color: #fff;
+}
+</style>
